@@ -1,0 +1,63 @@
+{
+  "$schema": "https://gui-cs.github.io/Terminal.Gui/schemas/tui-config-schema.json",
+  "Theme": "Timecheat",
+  "Themes": [
+    {
+      "Timecheat": {
+        "Window.DefaultBorderStyle": "Single",
+        "Dialog.DefaultBorderStyle": "Single",
+        "Dialog.DefaultShadow": "Transparent",
+        "Button.DefaultShadow": "None",
+        "Schemes": [
+          {
+            "Runnable": {
+              "Normal": { "Foreground": "#DCDCDC", "Background": "#212529", "Style": "None" },
+              "Focus": { "Foreground": "#FE6523", "Background": "#212529", "Style": "None" },
+              "Disabled": { "Foreground": "#6C757D", "Background": "#212529", "Style": "None" },
+              "Highlight": { "Foreground": "#FE6523", "Background": "#2C3034", "Style": "None" },
+              "Active": { "Foreground": "#FFFFFF", "Background": "#FE6523", "Style": "None" }
+            }
+          },
+          {
+            "Base": {
+              "Normal": { "Foreground": "#DEE6E6", "Background": "#212529", "Style": "None" },
+              "Focus": { "Foreground": "#FE6523", "Background": "#212529", "Style": "None" },
+              "HotNormal": { "Foreground": "#FE6523", "Background": "#212529", "Style": "None" },
+              "HotFocus": { "Foreground": "#FE6523", "Background": "#212529", "Style": "None" },
+              "Disabled": { "Foreground": "#6C757D", "Background": "#212529", "Style": "None" },
+              "Highlight": { "Foreground": "#FE6523", "Background": "#2C3034", "Style": "None" },
+              "Active": { "Foreground": "#FFFFFF", "Background": "#FE6523", "Style": "None" }
+            }
+          },
+          {
+            "Dialog": {
+              "Normal": { "Foreground": "#DEE6E6", "Background": "#2C3034", "Style": "None" },
+              "Focus": { "Foreground": "#FFFFFF", "Background": "#FE6523", "Style": "None" },
+              "Highlight": { "Foreground": "#FE6523", "Background": "#2C3034", "Style": "None" },
+              "Active": { "Foreground": "#FFFFFF", "Background": "#FE6523", "Style": "None" }
+            }
+          },
+          {
+            "Menu": {
+              "Normal": { "Foreground": "#DEE6E6", "Background": "#212529", "Style": "None" },
+              "Focus": { "Foreground": "#FE6523", "Background": "#212529", "Style": "None" },
+              "HotNormal": { "Foreground": "#FE6523", "Background": "#212529", "Style": "None" },
+              "HotFocus": { "Foreground": "#FE6523", "Background": "#212529", "Style": "None" },
+              "Disabled": { "Foreground": "#6C757D", "Background": "#212529", "Style": "None" },
+              "Highlight": { "Foreground": "#FE6523", "Background": "#2C3034", "Style": "None" },
+              "Active": { "Foreground": "#FFFFFF", "Background": "#FE6523", "Style": "None" }
+            }
+          },
+          {
+            "Error": {
+              "Normal": { "Foreground": "#DC3545", "Background": "#212529", "Style": "None" },
+              "Focus": { "Foreground": "#FFFFFF", "Background": "#DC3545", "Style": "None" },
+              "Highlight": { "Foreground": "#FE6523", "Background": "#2C3034", "Style": "None" },
+              "Active": { "Foreground": "#FFFFFF", "Background": "#FE6523", "Style": "None" }
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

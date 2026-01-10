@@ -8,14 +8,11 @@ using Terminal.Gui.Views;
 using TextCopy;
 using Timecheat;
 
+ConfigurationManager.Enable(ConfigLocations.All);
+
 using IApplication app = Application.Create();
 
 app.Init();
-
-ThemeManager.Theme = "Amber Phosphor";
-
-ConfigurationManager.Enable(ConfigLocations.All);
-ConfigurationManager.Apply();
 
 var mainWindow = new Window
 {
