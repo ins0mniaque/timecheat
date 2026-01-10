@@ -35,10 +35,10 @@ internal sealed partial class TimesheetGenerator
 
         return new Timesheet
         {
-            StartDate = startDate, // Keep original start date for reporting
+            StartDate = startDate,
             EndDate = endDate,
             Days = [.. dailyWork
-            .Where(kvp => kvp.Key >= startDate && kvp.Key <= endDate) // Filter output to requested range
+            .Where(kvp => kvp.Key.Date >= startDate.Date && kvp.Key.Date <= endDate.Date)
             .Select(kvp => new TimesheetDay
             {
                 Date = kvp.Key,

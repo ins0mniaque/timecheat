@@ -39,44 +39,30 @@ mainWindow.Add(repoLabel, repoButton, repoPathLabel);
 y += 2;
 
 // Author email (optional)
-var emailLabel = new Label { X = 1, Y = y, Text = "Author email (optional)" };
-var emailField = new TextField { X = 25, Y = y, Width = 30, Text = "" };
+var emailLabel = new Label { X = 1, Y = y, Text = "Author email" };
+var emailField = new TextField { X = 25, Y = y, Width = 30 };
 mainWindow.Add(emailLabel, emailField);
 y += 2;
 
 // Issue prefix
 var prefixLabel = new Label { X = 1, Y = y, Text = "Issue prefix" };
-var prefixField = new TextField { X = 25, Y = y, Width = 30, Text = "" };
+var prefixField = new TextField { X = 25, Y = y, Width = 30 };
 mainWindow.Add(prefixLabel, prefixField);
 y += 2;
 
+var today = DateTime.Now.Date;
+
 // Start date
 var startLabel = new Label { X = 1, Y = y, Text = "Start date" };
-var startField = new TextField { X = 25, Y = y, Width = 12, Text = "" };
+var startField = new DateField { X = 25, Y = y, Width = 12, Date = today.AddDays(-(int)today.DayOfWeek) };
 mainWindow.Add(startLabel, startField);
 y += 2;
 
 // End date
 var endLabel = new Label { X = 1, Y = y, Text = "End date" };
-var endField = new TextField { X = 25, Y = y, Width = 12, Text = "" };
+var endField = new DateField { X = 25, Y = y, Width = 12, Date = today.AddDays(6 - (int)today.DayOfWeek) };
 mainWindow.Add(endLabel, endField);
 y += 3;
-
-// Auto-format dates on lost focus
-void AutoFormatDate(TextField field)
-{
-    field.HasFocusChanged += (s, e) =>
-    {
-        if (!e.NewValue)
-        {
-            var txt = field.Text?.ToString()?.Trim() ?? "";
-            if (DateTime.TryParse(txt, out DateTime dt))
-                field.Text = $"{dt:yyyy-MM-dd}";
-        }
-    };
-}
-AutoFormatDate(startField);
-AutoFormatDate(endField);
 
 repoButton.Accepting += (s, e) => e.Handled = true;
 repoButton.Accepted += (s, e) =>
@@ -138,8 +124,7 @@ processButton.Accepted += (s, e) =>
         return;
     }
 
-    if (!DateTime.TryParse(startField.Text?.ToString()?.Trim(), out DateTime startDate) ||
-        !DateTime.TryParse(endField.Text?.ToString()?.Trim(), out DateTime endDate))
+    if (startField.Date is not { } startDate || endField.Date is not { } endDate)
     {
         MessageBox.ErrorQuery(app, "Error", "Please enter valid start and end dates", "OK");
         return;
