@@ -283,16 +283,8 @@ internal static class TaskTimeEstimator
         DateTime startDate,
         DateTime endDate)
     {
-        // Extend the range to include the weekend before startDate if startDate is Monday/Tuesday
-        // This ensures weekend work doesn't get lumped into Monday
-        var effectiveStartDate = startDate;
-        if (startDate.DayOfWeek == DayOfWeek.Monday)
-            effectiveStartDate = startDate.AddDays(-2); // Include Sat-Sun
-        else if (startDate.DayOfWeek == DayOfWeek.Tuesday)
-            effectiveStartDate = startDate.AddDays(-3); // Include Sat-Sun-Mon
-        else if (startDate.DayOfWeek == DayOfWeek.Wednesday)
-            effectiveStartDate = startDate.AddDays(-4); // Include Sat-Sun-Mon-Tue
-
+        // Look back a week to include previous commits to correctly identify tasks
+        var effectiveStartDate = startDate.AddDays(-7);
         var dailyWork = InitializeDailyWork(effectiveStartDate, endDate);
 
         // Filter out duplicates only - keep merge commits that weren't matched
