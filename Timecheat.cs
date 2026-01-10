@@ -351,20 +351,12 @@ internal static class TaskTimeEstimator
         foreach (var commit in commits)
         {
             var totalLines = commit.LinesAdded + commit.LinesDeleted;
-            double commitHours;
-
-            if (totalLines == 0 && commit.FilesChanged == 0)
-                commitHours = 0.5;
-            else if (totalLines <= 10 && commit.FilesChanged == 1)
-                commitHours = 0.5;
-            else if (totalLines <= 50 && commit.FilesChanged <= 3)
-                commitHours = 1.0;
-            else if (totalLines <= 200)
-                commitHours = 2.0;
-            else if (totalLines <= 500)
-                commitHours = 3.0;
-            else
-                commitHours = 4.0;
+            var commitHours = totalLines ==   0 && commit.FilesChanged is 0 ? 0.5 :
+                              totalLines <=  10 && commit.FilesChanged is 1 ? 0.5 :
+                              totalLines <=  50 && commit.FilesChanged <= 3 ? 1.0 :
+                              totalLines <= 200 ? 2.0 :
+                              totalLines <= 500 ? 3.0 :
+                                                  4.0;
 
             totalHours += commitHours;
         }
@@ -406,25 +398,12 @@ internal static class TaskTimeEstimator
                 var taskCommits = estimate.Commits;
 
                 // Calculate boost based on complexity signals
-                double boost = 0;
                 var totalLines = taskCommits.Sum(c => c.LinesAdded + c.LinesDeleted);
                 var filesChanged = taskCommits.Sum(c => c.FilesChanged);
 
-                // Small line changes often mean complex refactoring or research-heavy work
-                if (totalLines <= 20 && filesChanged <= 2)
-                {
-                    boost = Math.Min(1.5, estimate.Hours * 1.0); // Can double small tasks
-                }
-                // Medium changes with few files also suggests careful work
-                else if (totalLines <= 100 && filesChanged <= 5)
-                {
-                    boost = Math.Min(1.0, estimate.Hours * 0.75);
-                }
-                // Any task on a light day gets some boost
-                else
-                {
-                    boost = Math.Min(0.5, estimate.Hours * 0.5);
-                }
+                var boost = totalLines <=  20 && filesChanged <= 2 ? Math.Min(1.5, estimate.Hours * 1.0)  : // Can double small tasks
+                            totalLines <= 100 && filesChanged <= 5 ? Math.Min(1.0, estimate.Hours * 0.75) : // Medium changes with few files also suggests careful work
+                                                                     Math.Min(0.5, estimate.Hours * 0.5);   // Any task on a light day gets some boost
 
                 // Don't exceed what we need to add
                 boost = Math.Min(boost, hoursToAdd);

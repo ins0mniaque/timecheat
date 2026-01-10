@@ -1,11 +1,14 @@
 ﻿using LibGit2Sharp;
+
 using Terminal.Gui.App;
 using Terminal.Gui.Configuration;
 using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
+
 using TextCopy;
+
 using Timecheat;
 
 ConfigurationManager.Enable(ConfigLocations.All);
