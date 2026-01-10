@@ -23,7 +23,7 @@ var mainWindow = new Window
     Y = 0,
     Width = Dim.Fill(),
     Height = Dim.Fill(),
-    Title = "timecheat"
+    Title = " timecheat "
 };
 
 var y = 1;
@@ -83,7 +83,7 @@ repoButton.Accepted += (s, e) =>
 {
     var dlg = new OpenDialog
     {
-        Title = "Select repository",
+        Title = " Select repository ",
         AllowsMultipleSelection = false,
         Path = string.IsNullOrEmpty(lastRepoPath) ? Environment.CurrentDirectory : lastRepoPath
     };
@@ -99,8 +99,9 @@ repoButton.Accepted += (s, e) =>
         if (Repository.IsValid(repoPath))
         {
             using var repo = new Repository(repoPath);
-            var email = repo.Config.Get<string>("user.email")?.Value ?? "";
-            emailField.Text = email;
+
+            emailField.Text = repo.Config.Get<string>("user.email")?.Value ?? "";
+            prefixField.Text = repo.DetectBranchPrefix() ?? "";
         }
         else
             MessageBox.ErrorQuery(app, "Error", "Selected directory is not a git repository", "OK");
@@ -153,7 +154,7 @@ processButton.Accepted += (s, e) =>
         Y = 0,
         Width = Dim.Fill(),
         Height = Dim.Fill(),
-        Title = "Results"
+        Title = " Results "
     };
 
     // Content view for scrolling
