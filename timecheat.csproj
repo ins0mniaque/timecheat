@@ -12,7 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="LibGit2Sharp" Version="0.31.0" />
+    <PackageReference Include="NGitLab" Version="11.2.0" />
     <PackageReference Include="Terminal.Gui" Version="2.0.0-develop.4753" />
     <PackageReference Include="TextCopy" Version="6.2.1" />
   </ItemGroup>

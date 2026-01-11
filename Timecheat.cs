@@ -1,271 +1,39 @@
-﻿using System.Text.RegularExpressions;
+﻿namespace Timecheat;
 
-using LibGit2Sharp;
-
-namespace Timecheat;
-
-internal sealed partial class TimesheetGenerator
+internal sealed class TimesheetGenerator
 {
-    private readonly string _repoPath;
-    private readonly string _issuePattern;
-
-    public string? Author { get; set; }
-
-    public TimesheetGenerator(string repoPath, string issuePattern)
+    public TimesheetGenerator(IReadOnlyList<CommitInfo> commits)
     {
-        if (!Repository.IsValid(repoPath))
-            throw new ArgumentException("Invalid repository path", nameof(repoPath));
-
-        _repoPath = repoPath;
-        _issuePattern = issuePattern;
+        Commits = commits;
     }
+
+    public IReadOnlyList<CommitInfo> Commits { get; }
 
     public Timesheet TimesheetFor(DateTime startDate, DateTime endDate)
     {
-        using var repo = new Repository(_repoPath);
-
-        // Look back a week to include previous commits to correctly identify tasks
-        var collectFromDate = startDate.AddDays(-7);
-
-        var commits = CollectCommits(repo, collectFromDate, endDate);
-
-        MatchMergeCommits(commits);
-
-        var dailyWork = TaskTimeEstimator.EstimateHours(commits, collectFromDate, endDate);
+        var commits = Commits.Where(c => c.DateTime.Date >= startDate.Date && c.DateTime.Date <= endDate.Date).ToList();
+        var dailyWork = TaskTimeEstimator.EstimateHours(commits, startDate, endDate);
 
         return new Timesheet
         {
             StartDate = startDate,
             EndDate = endDate,
-            Days = [.. dailyWork
-            .Where(kvp => kvp.Key.Date >= startDate.Date && kvp.Key.Date <= endDate.Date)
-            .Select(kvp => new TimesheetDay
-            {
-                Date = kvp.Key,
-                TrackedTasks = kvp.Value.TrackedTasks,
-                UntrackedTasks = kvp.Value.UntrackedTasks
-            })],
+            Days = [.. dailyWork.Where(d => d.Key.Date >= startDate.Date &&
+                                            d.Key.Date <= endDate.Date)
+                                .Select(d => new TimesheetDay
+                                             {
+                                                 Date = d.Key,
+                                                 TrackedTasks = d.Value.TrackedTasks,
+                                                 UntrackedTasks = d.Value.UntrackedTasks
+                                             })],
             TotalCommits = commits.Count,
             TrackedCommits = commits.Count(c => c.HasIssue),
-            TaskCount = commits.Where(c => c.HasIssue).Select(c => c.IssueId).Distinct().Count()
+            TaskCount = commits.Where(c => c.HasIssue)
+                               .Select(c => c.IssueId)
+                               .Distinct()
+                               .Count()
         };
     }
-
-    private List<CommitInfo> CollectCommits(Repository repo, DateTime startDate, DateTime endDate)
-    {
-        var commits = new List<CommitInfo>();
-
-        var filter = new CommitFilter
-        {
-            IncludeReachableFrom = repo.Branches.Where(b => !b.IsRemote),
-            SortBy = CommitSortStrategies.Time
-        };
-
-        foreach (var commit in repo.Commits.QueryBy(filter))
-        {
-            if (!string.IsNullOrEmpty(Author) && !commit.Author.Email.Equals(Author, StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var localTime = commit.Author.When.LocalDateTime;
-            if (localTime.Date < startDate || localTime.Date > endDate)
-                continue;
-
-            var (taskId, issueId, hasIssue) = ExtractTaskInfo(commit.Message);
-            var isMerge = commit.Message.StartsWith("Merge branch", StringComparison.OrdinalIgnoreCase);
-            var (filesChanged, linesAdded, linesDeleted) = CalculateCommitStats(repo, commit);
-
-            commits.Add(new CommitInfo
-            {
-                Title = taskId,
-                Sha = commit.Sha,
-                TaskId = taskId,
-                IssueId = issueId,
-                HasIssue = hasIssue,
-                IsMergeCommit = isMerge,
-                DateTime = localTime,
-                Message = commit.MessageShort,
-                OriginalMessage = commit.Message,
-                FilesChanged = filesChanged,
-                LinesAdded = linesAdded,
-                LinesDeleted = linesDeleted
-            });
-        }
-
-        return [.. commits.OrderBy(c => c.DateTime)];
-    }
-
-    private static (int filesChanged, int linesAdded, int linesDeleted) CalculateCommitStats(Repository repo, Commit commit)
-    {
-        if (!commit.Parents.Any())
-            return (0, 0, 0);
-
-        var parent = commit.Parents.First();
-        var changes = repo.Diff.Compare<Patch>(parent.Tree, commit.Tree);
-
-        return (changes.Count(), changes.Sum(c => c.LinesAdded), changes.Sum(c => c.LinesDeleted));
-    }
-
-    private void MatchMergeCommits(List<CommitInfo> commits)
-    {
-        var mergeCommits = commits.Where(c => c.IsMergeCommit).ToList();
-        var regularCommits = commits.Where(c => !c.IsMergeCommit).ToList();
-
-        var normalizedByTask = regularCommits
-            .Select(c => c.TaskId)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(t => t, NormalizeBranchName, StringComparer.OrdinalIgnoreCase);
-
-        foreach (var merge in mergeCommits)
-        {
-            var mergeDate = merge.DateTime.Date;
-            var branchMatch = MatchBranchRegex().Match(merge.OriginalMessage);
-            if (!branchMatch.Success) continue;
-
-            var branchName = branchMatch.Groups[1].Value;
-            var normalizedBranch = NormalizeBranchName(branchName);
-
-            var candidates = regularCommits
-                .Where(c => c.DateTime.Date >= mergeDate.AddDays(-3) && c.DateTime.Date <= mergeDate)
-                .Where(c => !c.IsDuplicate)
-                .ToList();
-
-            if (candidates.Count is not 0)
-            {
-                var bestMatch = candidates
-                    .Select(commit =>
-                    {
-                        var normalized = normalizedByTask.TryGetValue(commit.TaskId, out var n) ? n : NormalizeBranchName(commit.TaskId);
-
-                        return new
-                        {
-                            Commit = commit,
-                            Normalized = normalized,
-                            Distance = LevenshteinDistance(normalizedBranch, normalized)
-                        };
-                    })
-                    .OrderBy(x => x.Distance)
-                    .FirstOrDefault();
-
-                if (bestMatch != null)
-                {
-                    var maxLength = Math.Max(normalizedBranch.Length, bestMatch.Normalized.Length);
-                    var threshold = maxLength / 2;
-
-                    if (bestMatch.Distance <= threshold)
-                    {
-                        merge.DateTime = bestMatch.Commit.DateTime;
-                        merge.Title = bestMatch.Commit.Title;
-
-                        if (merge.HasIssue)
-                            bestMatch.Commit.IsDuplicate = true;
-                        else
-                            merge.IsDuplicate = true;
-                    }
-                }
-            }
-        }
-    }
-
-    private string NormalizeBranchName(string name)
-    {
-        name = NormalizeBranchRegex().Replace(name, "");
-        name = Regex.Replace(name, _issuePattern + @"[\s\-_]*", "", RegexOptions.IgnoreCase);
-        name = name.ToUpperInvariant();
-        name = name.Replace('-', ' ').Replace('_', ' ');
-        name = WhitespaceRegex().Replace(name, " ").Trim();
-        return name;
-    }
-
-    private static int LevenshteinDistance(string s, string t)
-    {
-        if (string.IsNullOrEmpty(s)) return string.IsNullOrEmpty(t) ? 0 : t.Length;
-        if (string.IsNullOrEmpty(t)) return s.Length;
-
-        var n = s.Length;
-        var m = t.Length;
-        var cols = m + 1;
-        var d = new int[(n + 1) * cols];
-
-        for (var i = 0; i <= n; i++)
-            d[i * cols + 0] = i;
-
-        for (var j = 0; j <= m; j++)
-            d[0 * cols + j] = j;
-
-        for (var i = 1; i <= n; i++)
-        {
-            for (var j = 1; j <= m; j++)
-            {
-                var cost = (t[j - 1] == s[i - 1]) ? 0 : 1;
-                var idx = i * cols + j;
-                var above = (i - 1) * cols + j;
-                var left = i * cols + (j - 1);
-                var diag = (i - 1) * cols + (j - 1);
-
-                d[idx] = Math.Min(Math.Min(d[above] + 1, d[left] + 1), d[diag] + cost);
-            }
-        }
-
-        return d[n * cols + m];
-    }
-
-    private (string taskId, string? issueId, bool hasIssue) ExtractTaskInfo(string message)
-    {
-        var mergePatterns = new[]
-        {
-            @"Merge branch ['\""'](.+?)['\""']",
-            @"Merge pull request #\d+ from .+?[/:](.+?)(?:\s|$)",
-        };
-
-        foreach (var pattern in mergePatterns)
-        {
-            var mergeMatch = Regex.Match(message, pattern);
-            if (mergeMatch.Success)
-            {
-                var branchName = mergeMatch.Groups[1].Value;
-                var issueMatch = Regex.Match(branchName, $"(?<id>{_issuePattern})", RegexOptions.IgnoreCase);
-                if (issueMatch.Success)
-                {
-                    var issueId = issueMatch.Groups["id"].Value.ToUpperInvariant();
-                    var desc = branchName.Replace(issueId, "", StringComparison.OrdinalIgnoreCase).Trim('-', '_', ' ');
-                    if (!string.IsNullOrEmpty(desc))
-                    {
-                        desc = desc.Replace('-', ' ').Replace('_', ' ');
-                        return (desc, issueId, true);
-                    }
-
-                    return (issueId, issueId, true);
-                }
-
-                return ($"Merge branch '{branchName}'", null, false);
-            }
-        }
-
-        var patternWithDesc = $"(?<id>{_issuePattern})[\\s:\\-]*(?<desc>.*?)(?:\\n|$)";
-        var match = Regex.Match(message, patternWithDesc, RegexOptions.IgnoreCase);
-        if (match.Success)
-        {
-            var issueId = match.Groups["id"].Value.ToUpperInvariant();
-            var description = match.Groups["desc"].Value.Trim();
-            var taskId = string.IsNullOrEmpty(description) ? issueId : description;
-            return (taskId, issueId, true);
-        }
-
-        var firstLine = message.Split('\n')[0].Trim();
-        if (firstLine.Length > 50)
-            firstLine = string.Concat(firstLine.AsSpan(0, 47), "...");
-
-        return (firstLine, null, false);
-    }
-
-    [GeneratedRegex(@"Merge branch ['\""'](.+?)['\""']")]
-    private static partial Regex MatchBranchRegex();
-
-    [GeneratedRegex(@"^(Merge branch |feature/|bugfix/|hotfix/)", RegexOptions.IgnoreCase)]
-    private static partial Regex NormalizeBranchRegex();
-
-    [GeneratedRegex(@"\s+")]
-    private static partial Regex WhitespaceRegex();
 }
 
 /// <summary>
@@ -474,7 +242,7 @@ internal static class TaskCharacteristics
 internal static class TaskTimeEstimator
 {
     public static Dictionary<DateTime, DayWork> EstimateHours(
-        List<CommitInfo> commits,
+        IReadOnlyList<CommitInfo> commits,
         DateTime startDate,
         DateTime endDate)
     {

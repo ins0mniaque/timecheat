@@ -1,4 +1,4 @@
-﻿using LibGit2Sharp;
+﻿using NGitLab;
 
 using Terminal.Gui.App;
 using Terminal.Gui.Configuration;
@@ -29,20 +29,33 @@ var mainWindow = new Window
 
 var y = 1;
 
-// Repo directory
-var repoButton = new Button { X = 25, Y = y, Text = "Select" };
-var repoLabel = new Label { X = 1, Y = y, Text = "Repository directory" };
-var repoPathLabel = new Label { X = 36, Y = y, Text = "<none>" };
-var lastRepoPath = "";
-var repoPath = "";
-
-mainWindow.Add(repoLabel, repoButton, repoPathLabel);
+// GitLab token
+var tokenLabel = new Label { X = 1, Y = y, Text = "GitLab token" };
+var tokenField = new TextField
+{
+    X = 25,
+    Y = y,
+    Width = 40,
+    Secret = true
+};
+mainWindow.Add(tokenLabel, tokenField);
 y += 2;
 
-// Author email (optional)
-var emailLabel = new Label { X = 1, Y = y, Text = "Author email" };
-var emailField = new TextField { X = 25, Y = y, Width = 30 };
-mainWindow.Add(emailLabel, emailField);
+// GitLab project
+var projectButton = new Button { X = 25, Y = y, Text = "Select" };
+var projectLabel = new Label { X = 1, Y = y, Text = "GitLab project" };
+var projectPathLabel = new Label { X = 36, Y = y, Text = "<none>" };
+
+var selectedProjectId = 0L;
+var selectedProjectPath = (string?)null;
+
+mainWindow.Add(projectLabel, projectButton, projectPathLabel);
+y += 2;
+
+// Author (username)
+var authorLabel = new Label { X = 1, Y = y, Text = "Author (username)" };
+var authorField = new TextField { X = 25, Y = y, Width = 30 };
+mainWindow.Add(authorLabel, authorField);
 y += 2;
 
 // Issue prefix
@@ -55,26 +68,41 @@ var today = DateTime.Now.Date;
 
 // Start date
 var startLabel = new Label { X = 1, Y = y, Text = "Start date" };
-var startField = new DateField { X = 25, Y = y, Width = 12, Date = today.AddDays(-(int)today.DayOfWeek) };
+var startField = new DateField
+{
+    X = 25,
+    Y = y,
+    Width = 12,
+    Date = today.AddDays(-(int)today.DayOfWeek)
+};
 mainWindow.Add(startLabel, startField);
 y += 2;
 
 // End date
 var endLabel = new Label { X = 1, Y = y, Text = "End date" };
-var endField = new DateField { X = 25, Y = y, Width = 12, Date = today.AddDays(6 - (int)today.DayOfWeek) };
+var endField = new DateField
+{
+    X = 25,
+    Y = y,
+    Width = 12,
+    Date = today.AddDays(6 - (int)today.DayOfWeek)
+};
 mainWindow.Add(endLabel, endField);
 y += 3;
 
+// Date picker helpers (unchanged)
 void ShowDatePicker(DateField field)
 {
-    var picker = new DatePicker(field.Date ?? DateTime.Now.Date) { BorderStyle = LineStyle.None };
+    var picker = new DatePicker(field.Date ?? DateTime.Now.Date)
+    {
+        BorderStyle = LineStyle.None
+    };
 
     picker.Margin!.Thickness = new(1, 0, 1, 0);
 
     if (picker.SubViews.OfType<TableView>().FirstOrDefault() is not { } calendar)
         throw new InvalidOperationException("Could not find calendar inside DatePicker");
 
-    // HACK: Fix picker date field not being initialized with the initial date
     if (picker.SubViews.OfType<DateField>().FirstOrDefault() is { } pickerField)
         pickerField.Date = picker.Date;
 
@@ -115,34 +143,80 @@ void AttachDatePicker(DateField field)
 AttachDatePicker(startField);
 AttachDatePicker(endField);
 
-repoButton.Accepting += (s, e) => e.Handled = true;
-repoButton.Accepted += (s, e) =>
+// Project picker
+projectButton.Accepting += (s, e) => e.Handled = true;
+projectButton.Accepted += (s, e) =>
 {
-    var dlg = new OpenDialog
+    var token = tokenField.Text?.ToString()?.Trim();
+    if (string.IsNullOrEmpty(token))
     {
-        Title = " Select repository ",
-        AllowsMultipleSelection = false,
-        Path = string.IsNullOrEmpty(lastRepoPath) ? Environment.CurrentDirectory : lastRepoPath
+        MessageBox.ErrorQuery(app, "Error", "Please enter a GitLab token first", "OK");
+        return;
+    }
+
+    GitLabClient client;
+    try
+    {
+        client = new GitLabClient("https://gitlab.com", token);
+    }
+    catch (ArgumentException)
+    {
+        MessageBox.ErrorQuery(app, "Error", "Failed to create GitLab client", "OK");
+        return;
+    }
+
+    List<NGitLab.Models.Project> projects;
+    try
+    {
+        projects = client.Projects.Accessible
+            .OrderBy(p => p.PathWithNamespace)
+            .ToList();
+    }
+    catch (ArgumentException)
+    {
+        MessageBox.ErrorQuery(app, "Error", "Failed to connect to GitLab", "OK");
+        return;
+    }
+
+    var listView = new ListView
+    {
+        Width = Dim.Fill(),
+        Height = Dim.Fill()
     };
 
-    app.Run(dlg);
+    listView.SetSource<string>(new(projects.Select(p => p.PathWithNamespace)));
 
-    if (!dlg.Canceled)
+    var dialog = new Dialog { Title = " Select project ", Width = 48, Height = 12 };
+
+    dialog.Add(listView);
+
+    listView.OpenSelectedItem += (s, e) =>
     {
-        repoPath = dlg.Path?.ToString() ?? "";
-        lastRepoPath = repoPath;
-        repoPathLabel.Text = repoPath;
+        if (e.Item is not { } item)
+            return;
 
-        if (Repository.IsValid(repoPath))
+        var project = projects[item];
+        selectedProjectId = project.Id;
+        selectedProjectPath = project.PathWithNamespace;
+        projectPathLabel.Text = selectedProjectPath;
+
+        if (string.IsNullOrWhiteSpace(authorField.Text?.ToString()))
         {
-            using var repo = new Repository(repoPath);
+            var user = client.Users.Current;
 
-            emailField.Text = repo.Config.Get<string>("user.email")?.Value ?? "";
-            prefixField.Text = repo.DetectBranchPrefix() ?? "";
+            authorField.Text = user.Username ?? user.Name ?? "";
         }
-        else
-            MessageBox.ErrorQuery(app, "Error", "Selected directory is not a git repository", "OK");
-    }
+
+        if (string.IsNullOrWhiteSpace(prefixField.Text?.ToString()))
+        {
+            prefixField.Text =
+                client.DetectIssuePatternFromMergeRequests(selectedProjectId);
+        }
+
+        app.RequestStop();
+    };
+
+    app.Run(dialog);
 };
 
 // Process commits button
@@ -152,9 +226,16 @@ mainWindow.Add(processButton);
 processButton.Accepting += (s, e) => e.Handled = true;
 processButton.Accepted += (s, e) =>
 {
-    if (string.IsNullOrWhiteSpace(repoPath) || !Repository.IsValid(repoPath))
+    if (selectedProjectId == 0)
     {
-        MessageBox.ErrorQuery(app, "Error", "Invalid repository path", "OK");
+        MessageBox.ErrorQuery(app, "Error", "No GitLab project selected", "OK");
+        return;
+    }
+
+    var token = tokenField.Text?.ToString()?.Trim();
+    if (string.IsNullOrEmpty(token))
+    {
+        MessageBox.ErrorQuery(app, "Error", "No GitLab token specified", "OK");
         return;
     }
 
@@ -165,36 +246,47 @@ processButton.Accepted += (s, e) =>
         return;
     }
 
-    var generator = new TimesheetGenerator(repoPath, $@"({prefix}-\d+)");
-    var author = emailField.Text?.ToString()?.Trim() ?? "";
-    generator.Author = author;
-
-    if (string.IsNullOrWhiteSpace(generator.Author))
-    {
-        MessageBox.ErrorQuery(app, "Error", "No author email specified", "OK");
-        return;
-    }
-
-    if (startField.Date is not { } startDate || endField.Date is not { } endDate)
+    if (startField.Date is not { } startDate || endField.Date is not { } endDate || startDate > endDate)
     {
         MessageBox.ErrorQuery(app, "Error", "Please enter valid start and end dates", "OK");
         return;
     }
 
+    GitLabClient client;
+    try
+    {
+        client = new GitLabClient("https://gitlab.com", token);
+    }
+    catch (ArgumentException)
+    {
+        MessageBox.ErrorQuery(app, "Error", "Failed to create GitLab client", "OK");
+        return;
+    }
+
+    List<CommitInfo> commits;
+    try
+    {
+        commits = client.CollectCommitsFromMergeRequests(selectedProjectId, authorField.Text, startDate, endDate);
+    }
+    catch (ArgumentException)
+    {
+        MessageBox.ErrorQuery(app, "Error", "Failed to connect to GitLab", "OK");
+        return;
+    }
+
+    var generator = new TimesheetGenerator(commits);
     var timesheet = generator.TimesheetFor(startDate, endDate);
 
-    // === Results window ===
-    var resultWindow = new Window()
+    var resultWindow = new Window
     {
         X = 0,
         Y = 0,
         Width = Dim.Fill(),
         Height = Dim.Fill(),
-        Title = " Results "
+        Title = $" Timesheet — {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd} "
     };
 
-    // Content view for scrolling
-    var contentView = new View()
+    var contentView = new View
     {
         X = 0,
         Y = 0,
@@ -202,6 +294,7 @@ processButton.Accepted += (s, e) =>
         Height = Dim.Fill() - 3,
         CanFocus = true
     };
+
     resultWindow.Add(contentView);
 
     // Add results lines
@@ -210,19 +303,12 @@ processButton.Accepted += (s, e) =>
 
     void AddLine(string text)
     {
-        var label = new Label()
-        {
-            X = 0,
-            Y = ry,
-            Text = text
-        };
+        var label = new Label { X = 0, Y = ry, Text = text };
         contentView.Add(label);
-
         ry++;
         contentWidth = Math.Max(contentWidth, text.Length);
     }
 
-    // Fill with timesheet results
     AddLine($"Found {timesheet.TotalCommits} commits ({timesheet.TrackedCommits} tracked) across {timesheet.TaskCount} tasks");
     AddLine("");
 
@@ -246,9 +332,7 @@ processButton.Accepted += (s, e) =>
             {
                 AddLine("  Untracked (no issue):");
                 foreach (var task in day.UntrackedTasks.OrderBy(t => t.StartTime))
-                {
                     AddLine($"    {task.Hours:F1}h - {task.Title}");
-                }
             }
 
             AddLine("");
