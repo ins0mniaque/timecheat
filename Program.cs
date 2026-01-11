@@ -39,6 +39,12 @@ var tokenField = new TextField
     Secret = true
 };
 mainWindow.Add(tokenLabel, tokenField);
+
+// Credential store: create and attempt to reload saved token
+var credentialStore = CredentialStore.Create();
+try { tokenField.Text = credentialStore?.Get("timecheat", "gitlab-token") ?? ""; }
+catch (CredentialStoreException) { }
+
 y += 2;
 
 // GitLab project
@@ -154,6 +160,10 @@ projectButton.Accepted += (s, e) =>
         return;
     }
 
+    // Persist token
+    try { credentialStore?.Set("timecheat", "gitlab-token", token); }
+    catch (CredentialStoreException) { }
+
     GitLabClient client;
     try
     {
@@ -236,6 +246,10 @@ processButton.Accepted += (s, e) =>
         MessageBox.ErrorQuery(app, "Error", "No GitLab token specified", "OK");
         return;
     }
+
+    // Persist token
+    try { credentialStore?.Set("timecheat", "gitlab-token", token); }
+    catch (CredentialStoreException) { }
 
     var prefix = prefixField.Text?.ToString()?.Trim() ?? "";
     if (string.IsNullOrWhiteSpace(prefix))

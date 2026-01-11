@@ -7,8 +7,8 @@ namespace Timecheat;
 
 internal interface ICredentialStore
 {
-    void Set(string service, string account, string secret);
     string? Get(string service, string account);
+    void Set(string service, string account, string secret);
     void Delete(string service, string account);
 }
 
@@ -17,15 +17,36 @@ internal static class CredentialStore
     public static ICredentialStore? Create()
     {
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-            return LinuxSecretToolStore.IsAvailable() ? new LinuxSecretToolStore() : null;
+            return LinuxSecretToolStore.IsAvailable() ? new NormalizedExceptionDecorator(new LinuxSecretToolStore()) : null;
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
-            return MacOSKeychainStore.IsAvailable() ? new MacOSKeychainStore() : null;
+            return MacOSKeychainStore.IsAvailable() ? new NormalizedExceptionDecorator(new MacOSKeychainStore()) : null;
 
         if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-            return WindowsCredentialStore.IsAvailable() ? new WindowsCredentialStore() : null;
+            return WindowsCredentialStore.IsAvailable() ? new NormalizedExceptionDecorator(new WindowsCredentialStore()) : null;
 
         return null;
+    }
+
+    private sealed class NormalizedExceptionDecorator(ICredentialStore credentialStore) : ICredentialStore
+    {
+        public string? Get(string service, string account)
+        {
+            try { return credentialStore.Get(service, account); }
+            catch (Exception exception) { throw new CredentialStoreException("Failed to get credential", exception); }
+        }
+
+        public void Set(string service, string account, string secret)
+        {
+            try { credentialStore.Set(service, account, secret); }
+            catch (Exception exception) { throw new CredentialStoreException("Failed to set credential", exception); }
+        }
+
+        public void Delete(string service, string account)
+        {
+            try { credentialStore.Delete(service, account); }
+            catch (Exception exception) { throw new CredentialStoreException("Failed to delete credential", exception); }
+        }
     }
 }
 
@@ -37,15 +58,15 @@ internal sealed class LinuxSecretToolStore : ICredentialStore
 
     public static bool IsAvailable() => SecretToolPath is not null;
 
-    public void Set(string service, string account, string secret)
-    {
-        Run(secret, "store", "--label", service, "service", service, "account", account);
-    }
-
     public string? Get(string service, string account)
     {
         var output = RunCapture("lookup", "service", service, "account", account);
         return string.IsNullOrWhiteSpace(output) ? null : output.TrimEnd();
+    }
+
+    public void Set(string service, string account, string secret)
+    {
+        Run(secret, "store", "--label", service, "service", service, "account", account);
     }
 
     public void Delete(string service, string account)
@@ -88,15 +109,15 @@ internal sealed class MacOSKeychainStore : ICredentialStore
 
     public static bool IsAvailable() => File.Exists(SecurityToolPath);
 
-    public void Set(string service, string account, string secret)
-    {
-        Run("add-generic-password", "-U", "-s", service, "-a", account, "-w", secret);
-    }
-
     public string? Get(string service, string account)
     {
         var output = RunCapture("find-generic-password", "-s", service, "-a", account, "-w");
         return string.IsNullOrWhiteSpace(output) ? null : output.TrimEnd();
+    }
+
+    public void Set(string service, string account, string secret)
+    {
+        Run("add-generic-password", "-U", "-s", service, "-a", account, "-w", secret);
     }
 
     public void Delete(string service, string account)
@@ -141,16 +162,26 @@ internal sealed partial class WindowsCredentialStore : ICredentialStore
 
     public static bool IsAvailable() => true;
 
+    public string? Get(string service, string account)
+    {
+        if (!CredRead($"{service}:{account}", CRED_TYPE_GENERIC, 0, out var credPtr))
+            return null;
+
+        using var handle = new CriticalCredentialHandle(credPtr);
+        return handle.GetSecret();
+    }
+
     public void Set(string service, string account, string secret)
     {
-        var servicePtr = Marshal.StringToHGlobalUni(service);
+        var targetName = $"{service}:{account}";
+        var targetNamePtr = Marshal.StringToHGlobalUni(targetName);
         var accountPtr = Marshal.StringToHGlobalUni(account);
         var secretBytes = Encoding.Unicode.GetBytes(secret);
 
         var credential = new CREDENTIAL
         {
             Type = CRED_TYPE_GENERIC,
-            TargetName = servicePtr,
+            TargetName = targetNamePtr,
             UserName = accountPtr,
             CredentialBlobSize = (uint)secretBytes.Length,
             CredentialBlob = Marshal.AllocHGlobal(secretBytes.Length),
@@ -167,18 +198,9 @@ internal sealed partial class WindowsCredentialStore : ICredentialStore
         finally
         {
             Marshal.FreeHGlobal(credential.CredentialBlob);
-            Marshal.FreeHGlobal(servicePtr);
+            Marshal.FreeHGlobal(targetNamePtr);
             Marshal.FreeHGlobal(accountPtr);
         }
-    }
-
-    public string? Get(string service, string account)
-    {
-        if (!CredRead($"{service}:{account}", CRED_TYPE_GENERIC, 0, out var credPtr))
-            return null;
-
-        using var handle = new CriticalCredentialHandle(credPtr);
-        return handle.GetSecret();
     }
 
     public void Delete(string service, string account)
@@ -186,17 +208,17 @@ internal sealed partial class WindowsCredentialStore : ICredentialStore
         CredDelete($"{service}:{account}", CRED_TYPE_GENERIC, 0);
     }
 
-    [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
-    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
-    [return: MarshalAs(UnmanagedType.Bool)]
-    private static partial bool CredWrite(ref CREDENTIAL userCredential, uint flags);
-
-    [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [LibraryImport("advapi32.dll", EntryPoint = "CredReadW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool CredRead(string target, int type, int flags, out IntPtr credentialPtr);
 
-    [LibraryImport("advapi32.dll", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [LibraryImport("advapi32.dll", EntryPoint = "CredWriteW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
+    [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CredWrite(ref CREDENTIAL userCredential, uint flags);
+
+    [LibraryImport("advapi32.dll", EntryPoint = "CredDeleteW", StringMarshalling = StringMarshalling.Utf16, SetLastError = true)]
     [DefaultDllImportSearchPaths(DllImportSearchPath.System32)]
     [return: MarshalAs(UnmanagedType.Bool)]
     private static partial bool CredDelete(string target, int type, int flags);
@@ -232,4 +254,11 @@ internal sealed partial class WindowsCredentialStore : ICredentialStore
 
         public void Dispose() => CredFree(handle);
     }
+}
+
+internal sealed class CredentialStoreException : Exception
+{
+    public CredentialStoreException() { }
+    public CredentialStoreException(string message) : base(message) { }
+    public CredentialStoreException(string message, Exception innerException) : base(message, innerException) { }
 }
