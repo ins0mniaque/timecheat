@@ -2,6 +2,7 @@
 
 using Terminal.Gui.App;
 using Terminal.Gui.Configuration;
+using Terminal.Gui.Drawing;
 using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
@@ -63,6 +64,56 @@ var endLabel = new Label { X = 1, Y = y, Text = "End date" };
 var endField = new DateField { X = 25, Y = y, Width = 12, Date = today.AddDays(6 - (int)today.DayOfWeek) };
 mainWindow.Add(endLabel, endField);
 y += 3;
+
+void ShowDatePicker(DateField field)
+{
+    var picker = new DatePicker(field.Date ?? DateTime.Now.Date) { BorderStyle = LineStyle.None };
+
+    picker.Margin!.Thickness = new(1, 0, 1, 0);
+
+    if (picker.SubViews.OfType<TableView>().FirstOrDefault() is not { } calendar)
+        throw new InvalidOperationException("Could not find calendar inside DatePicker");
+
+    // HACK: Fix picker date field not being initialized with the initial date
+    if (picker.SubViews.OfType<DateField>().FirstOrDefault() is { } pickerField)
+        pickerField.Date = picker.Date;
+
+    calendar.CellActivated += (s, e) =>
+    {
+        field.Date = picker.Date;
+        app.RequestStop();
+    };
+
+    var dialog = new Dialog { BorderStyle = LineStyle.Rounded };
+
+    dialog.Add(picker);
+
+    app.Run(dialog);
+}
+
+void AttachDatePicker(DateField field)
+{
+    field.KeyDown += (s, e) =>
+    {
+        if (e.KeyCode is KeyCode.Enter)
+        {
+            ShowDatePicker(field);
+            e.Handled = true;
+        }
+    };
+
+    field.MouseEvent += (s, e) =>
+    {
+        if (e.Flags.HasFlag(MouseFlags.LeftButtonClicked))
+        {
+            ShowDatePicker(field);
+            e.Handled = true;
+        }
+    };
+}
+
+AttachDatePicker(startField);
+AttachDatePicker(endField);
 
 repoButton.Accepting += (s, e) => e.Handled = true;
 repoButton.Accepted += (s, e) =>
