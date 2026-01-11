@@ -49,7 +49,7 @@ internal static partial class GitLab
             }
         }
 
-        return result.OrderBy(c => c.DateTime).ToList();
+        return [.. result.OrderBy(c => c.DateTime)];
     }
 
     private static CommitInfo CreateCommitInfo(Commit commit, string? issueId) => new()
@@ -73,11 +73,10 @@ internal static partial class GitLab
         if (string.IsNullOrEmpty(text))
             return [];
 
-        return IssueIdRegex()
+        return [.. IssueIdRegex()
             .Matches(text)
             .Select(m => m.Value.ToUpperInvariant())
-            .Distinct()
-            .ToList();
+            .Distinct()];
     }
 
     [GeneratedRegex(@"([A-Z][A-Z0-9]+-\d+)", RegexOptions.IgnoreCase)]

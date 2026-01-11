@@ -168,9 +168,7 @@ projectButton.Accepted += (s, e) =>
     List<NGitLab.Models.Project> projects;
     try
     {
-        projects = client.Projects.Accessible
-            .OrderBy(p => p.PathWithNamespace)
-            .ToList();
+        projects = [.. client.Projects.Accessible.OrderBy(p => p.PathWithNamespace)];
     }
     catch (ArgumentException)
     {

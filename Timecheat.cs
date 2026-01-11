@@ -1,13 +1,8 @@
 ﻿namespace Timecheat;
 
-internal sealed class TimesheetGenerator
+internal sealed class TimesheetGenerator(IReadOnlyList<CommitInfo> commits)
 {
-    public TimesheetGenerator(IReadOnlyList<CommitInfo> commits)
-    {
-        Commits = commits;
-    }
-
-    public IReadOnlyList<CommitInfo> Commits { get; }
+    public IReadOnlyList<CommitInfo> Commits { get; } = commits;
 
     public Timesheet TimesheetFor(DateTime startDate, DateTime endDate)
     {
