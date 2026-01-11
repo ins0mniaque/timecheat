@@ -1,4 +1,6 @@
-﻿namespace Timecheat;
+﻿using NGitLab.Models;
+
+namespace Timecheat;
 
 internal sealed class TimesheetGenerator(IReadOnlyList<CommitInfo> commits)
 {
@@ -22,8 +24,8 @@ internal sealed class TimesheetGenerator(IReadOnlyList<CommitInfo> commits)
                                                  UntrackedTasks = d.Value.UntrackedTasks
                                              })],
             TotalCommits = commits.Count,
-            TrackedCommits = commits.Count(c => c.HasIssue),
-            TaskCount = commits.Where(c => c.HasIssue)
+            TrackedCommits = commits.Count(c => c.IssueId is not null),
+            TaskCount = commits.Where(c => c.IssueId is not null)
                                .Select(c => c.IssueId)
                                .Distinct()
                                .Count()
@@ -212,7 +214,6 @@ internal static class TaskTimeEstimator
         var dailyWork = InitializeDailyWork(effectiveStartDate, endDate);
 
         var activeCommits = commits
-            .Where(c => !c.IsDuplicate)
             .OrderBy(c => c.DateTime)
             .ToList();
 
@@ -283,7 +284,6 @@ internal static class TaskTimeEstimator
                 currentCommit.Title,
                 currentCommit.TaskId,
                 currentCommit.IssueId,
-                currentCommit.HasIssue,
                 hours,
                 currentCommit.DateTime,
                 currentTaskCommits
@@ -392,8 +392,8 @@ internal static class TaskTimeEstimator
             if (!dailyWork.TryGetValue(date, out var value))
                 dailyWork[date] = value = new();
 
-            var trackedEstimates = dailyEstimates[date].Where(t => t.HasIssue).ToList();
-            var untrackedEstimates = dailyEstimates[date].Where(t => !t.HasIssue).ToList();
+            var trackedEstimates = dailyEstimates[date].Where(t => t.IssueId is not null).ToList();
+            var untrackedEstimates = dailyEstimates[date].Where(t => t.IssueId is null).ToList();
 
             var totalTracked = trackedEstimates.Sum(t => t.Hours);
             var totalUntracked = untrackedEstimates.Sum(t => t.Hours);
@@ -577,7 +577,6 @@ internal static class TaskTimeEstimator
                                             task.Title,
                                             task.TaskId,
                                             task.IssueId,
-                                            task.HasIssue,
                                             hoursPerDay,
                                             day.AddHours(10),
                                             []
@@ -596,12 +595,11 @@ internal static class TaskTimeEstimator
         }
     }
 
-    private sealed class TaskEstimate(string title, string taskId, string? issueId, bool hasIssue, double hours, DateTime startTime, List<CommitInfo> commits)
+    private sealed class TaskEstimate(string title, string taskId, string? issueId, double hours, DateTime startTime, List<CommitInfo> commits)
     {
         public string Title { get; set; } = title;
         public string TaskId { get; set; } = taskId;
         public string? IssueId { get; set; } = issueId;
-        public bool HasIssue { get; set; } = hasIssue;
         public double Hours { get; set; } = hours;
         public DateTime StartTime { get; set; } = startTime;
         public List<CommitInfo> Commits { get; set; } = commits;
@@ -614,12 +612,8 @@ internal sealed class CommitInfo
     public string Sha { get; set; } = "";
     public string TaskId { get; set; } = "";
     public string? IssueId { get; set; }
-    public bool HasIssue { get; set; }
-    public bool IsMergeCommit { get; set; }
-    public bool IsDuplicate { get; set; }
     public DateTime DateTime { get; set; }
     public string Message { get; set; } = "";
-    public string OriginalMessage { get; set; } = "";
     public int FilesChanged { get; set; }
     public int LinesAdded { get; set; }
     public int LinesDeleted { get; set; }

@@ -61,11 +61,8 @@ internal static partial class GitLab
         Title = commit.Title,
         TaskId = issueId ?? commit.Title,
         IssueId = issueId,
-        HasIssue = issueId is not null,
-        IsMergeCommit = true,
         DateTime = commit.CommittedDate.ToLocalTime(),
-        Message = commit.Title,
-        OriginalMessage = commit.Message,
+        Message = commit.Message,
         FilesChanged = commit.Stats?.Total ?? 0,
         LinesAdded = commit.Stats?.Additions ?? 0,
         LinesDeleted = commit.Stats?.Deletions ?? 0
