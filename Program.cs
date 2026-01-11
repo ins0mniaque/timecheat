@@ -1,16 +1,17 @@
-﻿using NGitLab;
+﻿using System.Diagnostics.CodeAnalysis;
+
+using NGitLab;
 
 using Terminal.Gui.App;
 using Terminal.Gui.Configuration;
-using Terminal.Gui.Drawing;
 using Terminal.Gui.Drivers;
-using Terminal.Gui.Input;
 using Terminal.Gui.ViewBase;
 using Terminal.Gui.Views;
 
 using TextCopy;
 
 using Timecheat;
+using Timecheat.UI;
 
 ConfigurationManager.Enable(ConfigLocations.All);
 
@@ -18,7 +19,7 @@ using IApplication app = Application.Create();
 
 app.Init();
 
-var mainWindow = new Window
+using var mainWindow = new Window
 {
     X = 0,
     Y = 0,
@@ -96,58 +97,8 @@ var endField = new DateField
 mainWindow.Add(endLabel, endField);
 y += 3;
 
-// Date picker helpers (unchanged)
-void ShowDatePicker(DateField field)
-{
-    var picker = new DatePicker(field.Date ?? DateTime.Now.Date)
-    {
-        BorderStyle = LineStyle.None
-    };
-
-    picker.Margin!.Thickness = new(1, 0, 1, 0);
-
-    if (picker.SubViews.OfType<TableView>().FirstOrDefault() is not { } calendar)
-        throw new InvalidOperationException("Could not find calendar inside DatePicker");
-
-    if (picker.SubViews.OfType<DateField>().FirstOrDefault() is { } pickerField)
-        pickerField.Date = picker.Date;
-
-    calendar.CellActivated += (s, e) =>
-    {
-        field.Date = picker.Date;
-        app.RequestStop();
-    };
-
-    var dialog = new Dialog { BorderStyle = LineStyle.Rounded };
-
-    dialog.Add(picker);
-
-    app.Run(dialog);
-}
-
-void AttachDatePicker(DateField field)
-{
-    field.KeyDown += (s, e) =>
-    {
-        if (e.KeyCode is KeyCode.Enter)
-        {
-            ShowDatePicker(field);
-            e.Handled = true;
-        }
-    };
-
-    field.MouseEvent += (s, e) =>
-    {
-        if (e.Flags.HasFlag(MouseFlags.LeftButtonClicked))
-        {
-            ShowDatePicker(field);
-            e.Handled = true;
-        }
-    };
-}
-
-AttachDatePicker(startField);
-AttachDatePicker(endField);
+startField.WithDatePicker(app);
+endField.WithDatePicker(app);
 
 // Project picker
 projectButton.Accepting += (s, e) => e.Handled = true;
@@ -164,23 +115,13 @@ projectButton.Accepted += (s, e) =>
     try { credentialStore?.Set("timecheat", "gitlab-token", token); }
     catch (CredentialStoreException) { }
 
-    GitLabClient client;
-    try
-    {
-        client = new GitLabClient("https://gitlab.com", token);
-    }
-    catch (ArgumentException)
+    if (!Try(() => new GitLabClient("https://gitlab.com", token), out var client))
     {
         MessageBox.ErrorQuery(app, "Error", "Failed to create GitLab client", "OK");
         return;
     }
 
-    List<NGitLab.Models.Project> projects;
-    try
-    {
-        projects = [.. client.Projects.Accessible.OrderBy(p => p.PathWithNamespace)];
-    }
-    catch (ArgumentException)
+    if (!Try(() => client.Projects.Accessible.OrderBy(p => p.PathWithNamespace).ToList(), out var projects))
     {
         MessageBox.ErrorQuery(app, "Error", "Failed to connect to GitLab", "OK");
         return;
@@ -267,23 +208,13 @@ processButton.Accepted += (s, e) =>
         return;
     }
 
-    GitLabClient client;
-    try
-    {
-        client = new GitLabClient("https://gitlab.com", token);
-    }
-    catch (ArgumentException)
+    if (!Try(() => new GitLabClient("https://gitlab.com", token), out var client))
     {
         MessageBox.ErrorQuery(app, "Error", "Failed to create GitLab client", "OK");
         return;
     }
 
-    List<CommitInfo> commits;
-    try
-    {
-        commits = client.CollectCommitsFromMergeRequests(selectedProjectId, authorField.Text, startDate, endDate, cache);
-    }
-    catch (ArgumentException)
+    if (!Try(() => client.CollectCommitsFromMergeRequests(selectedProjectId, authorField.Text, startDate, endDate, cache), out var commits))
     {
         MessageBox.ErrorQuery(app, "Error", "Failed to connect to GitLab", "OK");
         return;
@@ -292,7 +223,7 @@ processButton.Accepted += (s, e) =>
     var generator = new TimesheetGenerator(commits);
     var timesheet = generator.TimesheetFor(startDate, endDate);
 
-    var resultWindow = new Window
+    using var resultWindow = new Window
     {
         X = 0,
         Y = 0,
@@ -360,64 +291,8 @@ processButton.Accepted += (s, e) =>
     if (workDays > 0)
         AddLine($"Average hours/day: {totalHours / workDays:F1}h");
 
-    // Enable scrolling on content view
-    contentView.SetContentSize(new System.Drawing.Size(contentWidth, ry));
-    contentView.VerticalScrollBar.Visible = true;
-    contentView.VerticalScrollBar.AutoShow = true;
-    contentView.HorizontalScrollBar.Visible = true;
-    contentView.HorizontalScrollBar.AutoShow = true;
+    contentView.Scrollable().SetContentSize(new System.Drawing.Size(contentWidth, ry));
 
-    // Handle keyboard scrolling (only when content view has focus)
-    contentView.KeyDown += (s, e) =>
-    {
-        switch (e.KeyCode)
-        {
-            case KeyCode.PageUp:
-                contentView.ScrollVertical(-contentView.Viewport.Height);
-                e.Handled = true;
-                return;
-            case KeyCode.PageDown:
-                contentView.ScrollVertical(contentView.Viewport.Height);
-                e.Handled = true;
-                return;
-            case KeyCode.CursorUp:
-                contentView.ScrollVertical(-1);
-                e.Handled = true;
-                return;
-            case KeyCode.CursorDown:
-                contentView.ScrollVertical(1);
-                e.Handled = true;
-                return;
-            case KeyCode.Home:
-                contentView.Viewport = new System.Drawing.Rectangle(0, 0, contentView.Viewport.Width, contentView.Viewport.Height);
-                e.Handled = true;
-                return;
-            case KeyCode.End:
-                int maxY = Math.Max(0, contentView.GetContentSize().Height - contentView.Viewport.Height);
-                contentView.Viewport = new System.Drawing.Rectangle(0, maxY, contentView.Viewport.Width, contentView.Viewport.Height);
-                e.Handled = true;
-                return;
-        }
-    };
-
-    // Handle mouse wheel scrolling
-    contentView.MouseEvent += (s, e) =>
-    {
-        if (e.Flags.HasFlag(MouseFlags.WheeledDown))
-        {
-            contentView.ScrollVertical(3);
-            e.Handled = true;
-            return;
-        }
-        else if (e.Flags.HasFlag(MouseFlags.WheeledUp))
-        {
-            contentView.ScrollVertical(-3);
-            e.Handled = true;
-            return;
-        }
-    };
-
-    // === Bottom buttons ===
     var logButton = new Button() { Text = "Log to Jira" };
     var copyButton = new Button() { Text = "Copy" };
     var closeButton = new Button() { Text = "Close" };
@@ -428,7 +303,6 @@ processButton.Accepted += (s, e) =>
     closeButton.Accepting += (s, e) => e.Handled = true;
     closeButton.Accepted += (s, e) => app.RequestStop();
 
-    // Layout buttons dynamically
     var spacing = 2;
     var padding = 4;
     var totalWidth = logButton.Text.Length + copyButton.Text.Length + closeButton.Text.Length + padding * 3 + spacing * 2;
@@ -444,7 +318,6 @@ processButton.Accepted += (s, e) =>
 
     resultWindow.Add(logButton, copyButton, closeButton);
 
-    // Esc closes the window
     resultWindow.KeyDown += (s, e) =>
     {
         if (e.KeyCode is KeyCode.Esc)
@@ -454,12 +327,23 @@ processButton.Accepted += (s, e) =>
         }
     };
 
-    // Set initial focus to content view for immediate scrolling
     contentView.SetFocus();
 
-    // Run the results window
     app.Run(resultWindow);
 };
 
 app.Run(mainWindow);
-mainWindow.Dispose();
+
+bool Try<T>(Func<T> func, [NotNullWhen(true)] out T value)
+{
+    try
+    {
+        value = func();
+        return value is not null;
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        value = default!;
+        return false;
+    }
+}
