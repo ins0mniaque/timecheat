@@ -227,6 +227,9 @@ projectButton.Accepted += (s, e) =>
     app.Run(dialog);
 };
 
+// GitLab cache
+var cache = new GitLabCache("timecheat");
+
 // Process commits button
 using var processButton = new Button { X = 1, Y = y, Text = "Process Commits" };
 mainWindow.Add(processButton);
@@ -278,7 +281,7 @@ processButton.Accepted += (s, e) =>
     List<CommitInfo> commits;
     try
     {
-        commits = client.CollectCommitsFromMergeRequests(selectedProjectId, authorField.Text, startDate, endDate);
+        commits = client.CollectCommitsFromMergeRequests(selectedProjectId, authorField.Text, startDate, endDate, cache);
     }
     catch (ArgumentException)
     {

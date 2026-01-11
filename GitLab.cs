@@ -1,4 +1,7 @@
-﻿using System.Text.RegularExpressions;
+﻿using System.Collections.Concurrent;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 using NGitLab;
 using NGitLab.Models;
@@ -7,7 +10,7 @@ namespace Timecheat;
 
 internal static partial class GitLab
 {
-    public static List<CommitInfo> CollectCommitsFromMergeRequests(this GitLabClient client, long projectId, string author, DateTime start, DateTime end)
+    public static List<CommitInfo> CollectCommitsFromMergeRequests(this GitLabClient client, long projectId, string author, DateTime start, DateTime end, GitLabCache cache)
     {
         var result = new List<CommitInfo>();
 
@@ -40,7 +43,7 @@ internal static partial class GitLab
 
             foreach (var commit in mrCommits.All)
             {
-                var detailedCommit = commitClient.GetCommit(commit.ShortId);
+                var detailedCommit = cache.GetCommit(commitClient, commit.ShortId);
 
                 if (issueIds.Count is 0)
                     result.Add(CreateCommitInfo(detailedCommit, null));
@@ -106,3 +109,55 @@ internal static partial class GitLab
             : @"[A-Z]+";
     }
 }
+
+internal sealed class GitLabCache
+{
+    private readonly string _cacheDir;
+    private readonly ConcurrentDictionary<string, Commit> _memoryCache = new();
+
+    public GitLabCache(string appName)
+    {
+        var baseDir = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrEmpty(baseDir))
+            baseDir = Directory.GetCurrentDirectory();
+
+        _cacheDir = Path.Combine(baseDir, appName, "commits");
+        Directory.CreateDirectory(_cacheDir);
+    }
+
+    public Commit GetCommit(ICommitClient commitClient, string commitSha)
+    {
+        if (_memoryCache.TryGetValue(commitSha, out var cachedCommit))
+            return cachedCommit;
+
+        var cacheFile = Path.Combine(_cacheDir, $"{commitSha}.json");
+
+        if (File.Exists(cacheFile))
+        {
+            cachedCommit = JsonSerializer.Deserialize(File.ReadAllText(cacheFile), GitLabContext.Default.Commit)
+                           ?? throw new JsonException($"Failed to deserialize commit {commitSha}");
+        }
+        else
+        {
+            cachedCommit = commitClient.GetCommit(commitSha);
+
+            File.WriteAllText(cacheFile, JsonSerializer.Serialize(cachedCommit, GitLabContext.Default.Commit));
+        }
+
+        _memoryCache[commitSha] = cachedCommit;
+        return cachedCommit;
+    }
+
+    public void ClearCache()
+    {
+        _memoryCache.Clear();
+
+        if (Directory.Exists(_cacheDir))
+            Directory.Delete(_cacheDir, true);
+
+        Directory.CreateDirectory(_cacheDir);
+    }
+}
+
+[JsonSerializable(typeof(Commit))]
+internal sealed partial class GitLabContext : JsonSerializerContext;
