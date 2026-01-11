@@ -38,43 +38,40 @@ internal static class Estimation
 {
     // Weekly targets
     public const double TargetWeeklyHours = 85.0;
-    public const double MinWeeklyHours = 75.0;
-    public const double MaxWeeklyHours = 95.0;
 
     // Daily limits
     public const double MaxHoursPerTask = 8.0;
     public const double MinHoursPerTask = 0.5;
-    public const double MaxHoursPerDay = 16.0;  // Hard cap per day
-    public const double LightDayThreshold = 4.0;
-    public const double HeavyDayThreshold = 7.0;
+    public const double MaxHoursPerDay = 16.0;
 
-    // Backfill settings
-    public const int MaxBackfillDayGap = 2;
-    public const double BackfillMinAmount = 1.5;  // Increased from 1.0
-    public const double LargeTaskBackfillPct = 0.40;  // Reduced from 0.50
-    public const double MediumTaskBackfillPct = 0.35;  // Reduced from 0.45
-    public const double SmallTaskBackfillPct = 0.30;  // Reduced from 0.40
+    // Sleep window - very probably asleep during this time
+    public const int SleepStartHour = 3;
+    public const int SleepEndHour = 7;
+
+    // Time-based estimation thresholds
+    public const double MaxReasonableWorkHours = 12.0;  // Max continuous work session
+    public const double MinTaskHours = 0.25;  // Minimum billable time
 
     // Scaling limits
     public const double MaxScaleFactor = 1.5;
     public const double MinScaleFactor = 0.7;
-    public const double ScaleThreshold = 0.15; // Only scale if >15% off target
+    public const double ScaleThreshold = 0.15;
 
-    // Task type multipliers
+    // Task type multipliers (for size-based fallback)
     internal static class TaskTypeMultipliers
     {
-        public const double Clean = 0.25;     // Deletions/cleanup are fast
-        public const double Fix = 0.7;        // Fixes are usually quick
-        public const double Build = 0.4;      // Build/pipeline fixes are mechanical
-        public const double Version = 0.2;    // Version bumps are trivial
-        public const double Refactor = 1.2;   // Refactors take longer than line count suggests
-        public const double Test = 1.1;       // Tests need thought
-        public const double Feature = 1.0;    // Baseline
-        public const double Infrastructure = 1.4; // Setup/config is time-consuming
-        public const double Database = 1.3;   // Database/storage work needs care
+        public const double Clean = 0.25;
+        public const double Fix = 0.7;
+        public const double Build = 0.4;
+        public const double Version = 0.2;
+        public const double Refactor = 1.2;
+        public const double Test = 1.1;
+        public const double Feature = 1.0;
+        public const double Infrastructure = 1.4;
+        public const double Database = 1.3;
     }
 
-    // Line count thresholds for first-day estimates
+    // Line count thresholds (for sanity checks and fallback)
     internal static class LineThresholds
     {
         public const int Tiny = 10;
@@ -87,7 +84,7 @@ internal static class Estimation
         public const int Huge = 1500;
     }
 
-    // Hour estimates for different sizes
+    // Hour estimates (for fallback when no previous commit)
     internal static class HourEstimates
     {
         public const double Tiny = 0.5;
@@ -101,32 +98,11 @@ internal static class Estimation
         public const double Massive = 10.0;
     }
 
-    // Follow-up day thresholds
-    internal static class FollowUpThresholds
-    {
-        public const int Small = 50;
-        public const int Medium = 150;
-        public const int Large = 300;
-    }
-
-    // Follow-up hour estimates
-    internal static class FollowUpHours
-    {
-        public const double Minimal = 0.5;
-        public const double Small = 1.0;
-        public const double Medium = 1.5;
-        public const double Large = 2.0;
-    }
-
-    // Complexity bonuses
     public const int FileCountBonusThreshold1 = 5;
     public const int FileCountBonusThreshold2 = 10;
     public const double FileCountBonus = 0.5;
 }
 
-/// <summary>
-/// Detects task characteristics from commit messages and metadata
-/// </summary>
 internal static class TaskCharacteristics
 {
     internal enum TaskType
@@ -146,12 +122,10 @@ internal static class TaskCharacteristics
     {
         var text = $"{title} {message}".ToUpperInvariant();
 
-        // Version bumps - most trivial
         if (text.Contains("BUMP VERSION", StringComparison.Ordinal) ||
             text.Contains("VERSION BUMP", StringComparison.Ordinal))
             return TaskType.Version;
 
-        // Build/pipeline fixes - mechanical
         if ((text.Contains("BUILD", StringComparison.Ordinal) ||
              text.Contains("PIPELINE", StringComparison.Ordinal) ||
              text.Contains("CI", StringComparison.Ordinal)) &&
@@ -159,18 +133,15 @@ internal static class TaskCharacteristics
              text.Contains("ERROR", StringComparison.Ordinal)))
             return TaskType.Build;
 
-        // Clean tasks: high deletions, keywords
         if (text.Contains("CLEAN", StringComparison.Ordinal) ||
             text.Contains("CLEANUP", StringComparison.Ordinal) ||
             text.Contains("REMOVE", StringComparison.Ordinal) ||
             text.Contains("DELETE", StringComparison.Ordinal))
         {
-            // Only if actually deleting more than adding
             if (linesDeleted > linesAdded || text.Contains("CLEAN UP", StringComparison.Ordinal))
                 return TaskType.Clean;
         }
 
-        // Database/storage work
         if (text.Contains("DATABASE", StringComparison.Ordinal) ||
             text.Contains("MONGODB", StringComparison.Ordinal) ||
             text.Contains("SQLITE", StringComparison.Ordinal) ||
@@ -180,7 +151,6 @@ internal static class TaskCharacteristics
             text.Contains("STORAGE", StringComparison.Ordinal))
             return TaskType.Database;
 
-        // Fix tasks - but not build fixes (already handled)
         if (text.Contains("FIX", StringComparison.Ordinal) ||
             text.Contains("BUG", StringComparison.Ordinal) ||
             text.Contains("CRASH", StringComparison.Ordinal) ||
@@ -188,7 +158,6 @@ internal static class TaskCharacteristics
             text.Contains("ERROR", StringComparison.Ordinal))
             return TaskType.Fix;
 
-        // Refactor tasks
         if (text.Contains("REFACTOR", StringComparison.Ordinal) ||
             text.Contains("REORGANIZE", StringComparison.Ordinal) ||
             text.Contains("RESTRUCTURE", StringComparison.Ordinal) ||
@@ -198,13 +167,11 @@ internal static class TaskCharacteristics
             text.Contains("MOVE", StringComparison.Ordinal))
             return TaskType.Refactor;
 
-        // Test tasks
         if (text.Contains("TEST", StringComparison.Ordinal) ||
             text.Contains("SPEC", StringComparison.Ordinal) ||
             text.Contains("COVERAGE", StringComparison.Ordinal))
             return TaskType.Test;
 
-        // Infrastructure
         if (text.Contains("PIPELINE", StringComparison.Ordinal) ||
             text.Contains("DEPLOY", StringComparison.Ordinal) ||
             text.Contains("DOCKER", StringComparison.Ordinal) ||
@@ -244,11 +211,13 @@ internal static class TaskTimeEstimator
         var effectiveStartDate = startDate.AddDays(-7);
         var dailyWork = InitializeDailyWork(effectiveStartDate, endDate);
 
-        var activeCommits = commits.Where(c => !c.IsDuplicate).ToList();
-        var taskLifecycles = BuildTaskLifecycles(activeCommits);
-        var dailyEstimates = EstimateTasksByDay(activeCommits, taskLifecycles);
+        var activeCommits = commits
+            .Where(c => !c.IsDuplicate)
+            .OrderBy(c => c.DateTime)
+            .ToList();
 
-        SmartBackfillEmptyDays(dailyEstimates, taskLifecycles);
+        var dailyEstimates = EstimateTasksFromCommitTimes(activeCommits);
+        BackfillLargeTasksToEmptyDays(dailyEstimates, activeCommits, effectiveStartDate);
         AssignToDailyWork(dailyWork, dailyEstimates);
         ScaleToWeeklyTarget(dailyWork, effectiveStartDate, endDate);
 
@@ -263,176 +232,155 @@ internal static class TaskTimeEstimator
         return dailyWork;
     }
 
-    private static Dictionary<string, TaskLifecycle> BuildTaskLifecycles(List<CommitInfo> commits)
+    private static Dictionary<DateTime, List<TaskEstimate>> EstimateTasksFromCommitTimes(List<CommitInfo> commits)
     {
-        var lifecycles = new Dictionary<string, TaskLifecycle>();
+        var estimates = new List<TaskEstimate>();
 
-        var taskGroups = commits.Where(c => c.HasIssue).GroupBy(c => c.TaskId);
-
-        foreach (var group in taskGroups)
+        for (int i = 0; i < commits.Count; i++)
         {
-            var taskCommits = group.OrderBy(c => c.DateTime).ToList();
-            var commitsByDay = taskCommits
-                .GroupBy(c => c.DateTime.Date)
-                .OrderBy(g => g.Key)
-                .ToList();
+            var currentCommit = commits[i];
+            var currentTaskCommits = commits.Where(c => c.TaskId == currentCommit.TaskId).ToList();
 
-            lifecycles[group.Key] = new TaskLifecycle
+            // Skip if we've already processed this task
+            if (estimates.Any(e => e.TaskId == currentCommit.TaskId))
+                continue;
+
+            double hours;
+
+            if (i == 0)
             {
-                TaskId = group.Key,
-                FirstCommitDate = taskCommits.First().DateTime.Date,
-                AllCommits = taskCommits,
-                DayCount = commitsByDay.Count,
-                CommitDates = [.. commitsByDay.Select(g => g.Key)]
-            };
-        }
-
-        return lifecycles;
-    }
-
-    private static Dictionary<DateTime, List<TaskEstimate>> EstimateTasksByDay(
-        List<CommitInfo> activeCommits,
-        Dictionary<string, TaskLifecycle> lifecycles)
-    {
-        var dailyEstimates = new Dictionary<DateTime, List<TaskEstimate>>();
-        var commitsByDate = activeCommits.GroupBy(c => c.DateTime.Date).OrderBy(g => g.Key);
-
-        foreach (var dayGroup in commitsByDate)
-        {
-            var date = dayGroup.Key;
-            var dayCommits = dayGroup.OrderBy(c => c.DateTime).ToList();
-            var estimates = new List<TaskEstimate>();
-
-            // Process tracked tasks
-            var trackedGroups = dayCommits.Where(c => c.HasIssue).GroupBy(c => c.TaskId);
-
-            foreach (var taskGroup in trackedGroups)
+                // First commit ever - assume started work ~2 hours ago
+                hours = EstimateFromTimeDelta(TimeSpan.FromHours(2), currentTaskCommits, currentCommit.Title, currentCommit.Message);
+            }
+            else
             {
-                var taskId = taskGroup.Key;
-                var taskCommits = taskGroup.ToList();
-                var firstCommit = taskCommits.First();
-                var lifecycle = lifecycles[taskId];
+                var previousCommit = commits[i - 1];
+                var timeDelta = currentCommit.DateTime - previousCommit.DateTime;
 
-                var hours = EstimateTaskHoursForDay(
-                    taskCommits,
-                    lifecycle.FirstCommitDate == date,
-                    firstCommit.Title,
-                    firstCommit.Message);
+                // If this is the first commit after likely sleeping (previous commit was before 3 AM, current is after 7 AM)
+                // OR if more than 8 hours passed (likely slept), cap the time delta
+                var previousInSleepWindow = previousCommit.DateTime.Hour >= Estimation.SleepStartHour || previousCommit.DateTime.Hour < Estimation.SleepEndHour;
+                var currentAfterSleep = currentCommit.DateTime.Hour >= Estimation.SleepEndHour;
+                var likelySlept = (previousInSleepWindow && currentAfterSleep) || timeDelta.TotalHours > 8;
 
-                estimates.Add(new TaskEstimate(
-                    firstCommit.Title,
-                    taskId,
-                    firstCommit.IssueId,
-                    true,
-                    hours,
-                    taskCommits.First().DateTime,
-                    taskCommits
-                ));
+                if (likelySlept)
+                {
+                    // First commit of new work session - assume started ~1-2 hours ago
+                    // Use commit size to guess: small commits = less time, larger = more time
+                    var totalLines = currentTaskCommits.Sum(c => c.LinesAdded + c.LinesDeleted);
+                    var assumedHours = totalLines <= 50 ? 1.0 :
+                                      totalLines <= 200 ? 1.5 :
+                                      2.0;
+                    hours = EstimateFromTimeDelta(TimeSpan.FromHours(assumedHours), currentTaskCommits, currentCommit.Title, currentCommit.Message);
+                }
+                else
+                {
+                    hours = EstimateFromTimeDelta(timeDelta, currentTaskCommits, currentCommit.Title, currentCommit.Message);
+                }
             }
 
-            // Process untracked tasks
-            var untrackedGroups = dayCommits.Where(c => !c.HasIssue).GroupBy(c => c.TaskId);
-
-            foreach (var taskGroup in untrackedGroups)
-            {
-                var taskCommits = taskGroup.ToList();
-                var firstCommit = taskCommits.First();
-                var hours = EstimateUntrackedTask(taskCommits, firstCommit.Title, firstCommit.Message);
-
-                estimates.Add(new TaskEstimate(
-                    firstCommit.Title,
-                    taskGroup.Key,
-                    null,
-                    false,
-                    hours,
-                    taskCommits.First().DateTime,
-                    taskCommits
-                ));
-            }
-
-            dailyEstimates[date] = estimates;
+            estimates.Add(new TaskEstimate(
+                currentCommit.Title,
+                currentCommit.TaskId,
+                currentCommit.IssueId,
+                currentCommit.HasIssue,
+                hours,
+                currentCommit.DateTime,
+                currentTaskCommits
+            ));
         }
 
-        return dailyEstimates;
+        // Group by date for daily work assignment
+        return estimates
+            .GroupBy(e => e.StartTime.Date)
+            .ToDictionary(g => g.Key, g => g.ToList());
     }
 
-    private static double EstimateTaskHoursForDay(
-        List<CommitInfo> dayCommits,
-        bool isFirstDay,
+    private static double EstimateFromTimeDelta(
+        TimeSpan timeDelta,
+        List<CommitInfo> taskCommits,
         string title,
         string message)
     {
-        var totalLines = dayCommits.Sum(c => c.LinesAdded + c.LinesDeleted);
-        var totalFiles = dayCommits.Sum(c => c.FilesChanged);
-        var linesAdded = dayCommits.Sum(c => c.LinesAdded);
-        var linesDeleted = dayCommits.Sum(c => c.LinesDeleted);
+        var totalHours = timeDelta.TotalHours;
 
-        // Detect task type
-        var taskType = TaskCharacteristics.DetectTaskType(title, message, linesDeleted, linesAdded);
-        var typeMultiplier = TaskCharacteristics.GetTypeMultiplier(taskType);
+        // Subtract sleep time if the delta crosses the sleep window
+        var sleepHours = CalculateSleepHours(timeDelta);
 
-        if (isFirstDay)
-        {
-            // Base estimation on line count
-            var baseHours = totalLines is 0 && totalFiles is 0 ? Estimation.HourEstimates.Tiny :
-                            totalLines <= Estimation.LineThresholds.Tiny ? Estimation.HourEstimates.Tiny :
-                            totalLines <= Estimation.LineThresholds.Small ? Estimation.HourEstimates.Small :
-                            totalLines <= Estimation.LineThresholds.SmallMedium ? Estimation.HourEstimates.SmallMedium :
-                            totalLines <= Estimation.LineThresholds.Medium ? Estimation.HourEstimates.Medium :
-                            totalLines <= Estimation.LineThresholds.MediumLarge ? Estimation.HourEstimates.MediumLarge :
-                            totalLines <= Estimation.LineThresholds.Large ? Estimation.HourEstimates.Large :
-                            totalLines <= Estimation.LineThresholds.VeryLarge ? Estimation.HourEstimates.VeryLarge :
-                            totalLines <= Estimation.LineThresholds.Huge ? Estimation.HourEstimates.Huge :
-                                                                                 Estimation.HourEstimates.Massive;
+        totalHours -= sleepHours;
 
-            // Apply task type multiplier
-            baseHours *= typeMultiplier;
+        // Cap at reasonable work session length
+        totalHours = Math.Min(totalHours, Estimation.MaxReasonableWorkHours);
 
-            // Complexity bonuses
-            if (totalFiles > Estimation.FileCountBonusThreshold1)
-                baseHours += Estimation.FileCountBonus;
-            if (totalFiles > Estimation.FileCountBonusThreshold2)
-                baseHours += Estimation.FileCountBonus;
+        // Sanity check against commit size
+        var sizeBasedEstimate = EstimateFromSize(taskCommits, title, message);
 
-            return Math.Round(baseHours * 2) / 2;
-        }
-        else
-        {
-            // Follow-up days
-            var baseHours = Estimation.FollowUpHours.Minimal;
+        // If time suggests much more work than size indicates, trust size more
+        // (e.g. working on something else in between)
+        if (totalHours > sizeBasedEstimate * 2.5)
+            totalHours = Math.Max(sizeBasedEstimate, totalHours * 0.4);
 
-            if (totalLines > Estimation.FollowUpThresholds.Small)
-                baseHours = Estimation.FollowUpHours.Small;
-            if (totalLines > Estimation.FollowUpThresholds.Medium)
-                baseHours = Estimation.FollowUpHours.Medium;
-            if (totalLines > Estimation.FollowUpThresholds.Large)
-                baseHours = Estimation.FollowUpHours.Large;
+        // If time suggests much less work than size indicates, trust time but add a bit
+        // (e.g. quick fix during bigger task)
+        if (totalHours < sizeBasedEstimate * 0.4 && sizeBasedEstimate > 2.0)
+            totalHours = Math.Min(sizeBasedEstimate, totalHours * 1.5);
 
-            // Apply reduced multiplier for follow-ups
-            baseHours *= Math.Min(typeMultiplier, 1.0);
+        totalHours = Math.Max(Estimation.MinTaskHours, totalHours);
+        totalHours = Math.Min(Estimation.MaxHoursPerTask, totalHours);
 
-            return Math.Round(baseHours * 2) / 2;
-        }
+        return Math.Round(totalHours * 2) / 2;
     }
 
-    private static double EstimateUntrackedTask(List<CommitInfo> commits, string title, string message)
+    private static double CalculateSleepHours(TimeSpan timeDelta)
+    {
+        if (timeDelta.TotalHours < 4)
+            return 0;
+
+        // Rough heuristic: if delta > 4 hours, assume one sleep period crossed
+        // Sleep window is 3 AM to 7 AM (4 hours)
+        if (timeDelta.TotalHours >= 4 && timeDelta.TotalHours <= 24)
+        {
+            return 4.0;  // One sleep period
+        }
+
+        if (timeDelta.TotalHours > 24)
+        {
+            var days = (int)(timeDelta.TotalHours / 24);
+            return days * 4.0;  // Multiple sleep periods
+        }
+
+        return 0;
+    }
+
+    private static double EstimateFromSize(List<CommitInfo> commits, string title, string message)
     {
         var totalLines = commits.Sum(c => c.LinesAdded + c.LinesDeleted);
+        var totalFiles = commits.Sum(c => c.FilesChanged);
         var linesAdded = commits.Sum(c => c.LinesAdded);
         var linesDeleted = commits.Sum(c => c.LinesDeleted);
 
         var taskType = TaskCharacteristics.DetectTaskType(title, message, linesDeleted, linesAdded);
         var typeMultiplier = TaskCharacteristics.GetTypeMultiplier(taskType);
 
-        var hours = totalLines is 0 ? Estimation.HourEstimates.Tiny :
-                    totalLines <= 20 ? 1.0 :
-                    totalLines <= 80 ? 2.0 :
-                    totalLines <= 200 ? 3.0 :
-                    totalLines <= 500 ? 4.5 :
-                                        6.0;
+        var baseHours = totalLines is 0 && totalFiles is 0 ? Estimation.HourEstimates.Tiny :
+                        totalLines <= Estimation.LineThresholds.Tiny ? Estimation.HourEstimates.Tiny :
+                        totalLines <= Estimation.LineThresholds.Small ? Estimation.HourEstimates.Small :
+                        totalLines <= Estimation.LineThresholds.SmallMedium ? Estimation.HourEstimates.SmallMedium :
+                        totalLines <= Estimation.LineThresholds.Medium ? Estimation.HourEstimates.Medium :
+                        totalLines <= Estimation.LineThresholds.MediumLarge ? Estimation.HourEstimates.MediumLarge :
+                        totalLines <= Estimation.LineThresholds.Large ? Estimation.HourEstimates.Large :
+                        totalLines <= Estimation.LineThresholds.VeryLarge ? Estimation.HourEstimates.VeryLarge :
+                        totalLines <= Estimation.LineThresholds.Huge ? Estimation.HourEstimates.Huge :
+                                                                             Estimation.HourEstimates.Massive;
 
-        hours *= typeMultiplier;
-        return Math.Round(hours * 2) / 2;
+        baseHours *= typeMultiplier;
+
+        if (totalFiles > Estimation.FileCountBonusThreshold1)
+            baseHours += Estimation.FileCountBonus;
+        if (totalFiles > Estimation.FileCountBonusThreshold2)
+            baseHours += Estimation.FileCountBonus;
+
+        return Math.Round(baseHours * 2) / 2;
     }
 
     private static void AssignToDailyWork(
@@ -447,24 +395,15 @@ internal static class TaskTimeEstimator
             var trackedEstimates = dailyEstimates[date].Where(t => t.HasIssue).ToList();
             var untrackedEstimates = dailyEstimates[date].Where(t => !t.HasIssue).ToList();
 
-            // Calculate total before capping
             var totalTracked = trackedEstimates.Sum(t => t.Hours);
             var totalUntracked = untrackedEstimates.Sum(t => t.Hours);
             var grandTotal = totalTracked + totalUntracked;
 
-            // If day exceeds max hours, scale down proportionally BEFORE weekly scaling
             if (grandTotal > Estimation.MaxHoursPerDay)
             {
                 var scaleFactor = Estimation.MaxHoursPerDay / grandTotal;
 
-                foreach (var estimate in trackedEstimates)
-                {
-                    estimate.Hours *= scaleFactor;
-                    estimate.Hours = Math.Round(estimate.Hours * 2) / 2;
-                    estimate.Hours = Math.Max(Estimation.MinHoursPerTask, estimate.Hours);
-                }
-
-                foreach (var estimate in untrackedEstimates)
+                foreach (var estimate in trackedEstimates.Concat(untrackedEstimates))
                 {
                     estimate.Hours *= scaleFactor;
                     estimate.Hours = Math.Round(estimate.Hours * 2) / 2;
@@ -500,99 +439,6 @@ internal static class TaskTimeEstimator
         }
     }
 
-    private static void SmartBackfillEmptyDays(
-        Dictionary<DateTime, List<TaskEstimate>> dailyEstimates,
-        Dictionary<string, TaskLifecycle> taskLifecycles)
-    {
-        var sortedDates = dailyEstimates.Keys.OrderBy(d => d).ToList();
-
-        for (var i = 0; i < sortedDates.Count - 1; i++)
-        {
-            var currentDay = sortedDates[i];
-            var nextDay = sortedDates[i + 1];
-
-            var dayGap = (nextDay - currentDay).Days;
-            if (dayGap > Estimation.MaxBackfillDayGap)
-                continue;
-
-            var currentDayHours = dailyEstimates.TryGetValue(currentDay, out var value)
-                ? value.Where(t => t.HasIssue).Sum(t => t.Hours)
-                : 0;
-
-            if (currentDayHours >= Estimation.LightDayThreshold)
-                continue;
-
-            if (!dailyEstimates.ContainsKey(nextDay))
-                continue;
-
-            var nextDayEstimates = dailyEstimates[nextDay].Where(t => t.HasIssue).ToList();
-            var nextDayHours = nextDayEstimates.Sum(t => t.Hours);
-
-            if (nextDayHours <= Estimation.HeavyDayThreshold)
-                continue;
-
-            var backfillCandidates = nextDayEstimates
-                .Where(t => t.Hours >= 2.5)
-                .Where(t => {
-                    var lifecycle = taskLifecycles[t.TaskId];
-                    return lifecycle.FirstCommitDate == nextDay;
-                })
-                .OrderByDescending(t => t.Hours)
-                .ToList();
-
-            if (backfillCandidates.Count is 0)
-                continue;
-
-            var hoursNeeded = Math.Min(
-                Estimation.MaxHoursPerTask - currentDayHours,
-                nextDayHours - Estimation.HeavyDayThreshold);
-            hoursNeeded = Math.Max(0, hoursNeeded);
-
-            if (hoursNeeded < Estimation.BackfillMinAmount)
-                continue;
-
-            if (!dailyEstimates.ContainsKey(currentDay))
-                dailyEstimates[currentDay] = [];
-
-            var backfilled = 0.0;
-            foreach (var candidate in backfillCandidates)
-            {
-                if (backfilled >= hoursNeeded)
-                    break;
-
-                var lifecycle = taskLifecycles[candidate.TaskId];
-                var totalLines = lifecycle.AllCommits.Sum(c => c.LinesAdded + c.LinesDeleted);
-
-                var backfillPct = totalLines >= 500 ? Estimation.LargeTaskBackfillPct :
-                                    totalLines >= 300 ? Estimation.MediumTaskBackfillPct :
-                                                        Estimation.SmallTaskBackfillPct;
-
-                var hoursToBackfill = candidate.Hours * backfillPct;
-                hoursToBackfill = Math.Min(hoursToBackfill, hoursNeeded - backfilled);
-                hoursToBackfill = Math.Round(hoursToBackfill * 2) / 2;
-
-                if (hoursToBackfill < Estimation.BackfillMinAmount)
-                    continue;
-
-                dailyEstimates[currentDay].Add(new TaskEstimate(
-                    candidate.Title,
-                    candidate.TaskId,
-                    candidate.IssueId,
-                    true,
-                    hoursToBackfill,
-                    currentDay.AddHours(9),
-                    []
-                ));
-
-                candidate.Hours -= hoursToBackfill;
-                candidate.Hours = Math.Max(Estimation.MinHoursPerTask, candidate.Hours);
-                candidate.Hours = Math.Round(candidate.Hours * 2) / 2;
-
-                backfilled += hoursToBackfill;
-            }
-        }
-    }
-
     private static void ScaleToWeeklyTarget(
         Dictionary<DateTime, DayWork> dailyWork,
         DateTime startDate,
@@ -615,12 +461,16 @@ internal static class TaskTimeEstimator
         {
             var weekDays = week.Value;
             var currentWeekHours = weekDays.Sum(d =>
-                dailyWork[d].TrackedTasks.Sum(t => t.Hours));
+                dailyWork[d].TrackedTasks.Sum(t => t.Hours) +
+                dailyWork[d].UntrackedTasks.Sum(t => t.Hours));
 
             if (currentWeekHours is 0)
                 continue;
 
-            var daysWithWork = weekDays.Count(d => dailyWork[d].TrackedTasks.Count is not 0);
+            var daysWithWork = weekDays.Count(d =>
+                dailyWork[d].TrackedTasks.Count is not 0 ||
+                dailyWork[d].UntrackedTasks.Count is not 0);
+
             if (daysWithWork is 0)
                 continue;
 
@@ -646,15 +496,6 @@ internal static class TaskTimeEstimator
                         Estimation.MinHoursPerTask,
                         Math.Min(task.Hours, Estimation.MaxHoursPerTask));
                 }
-
-                foreach (var task in dailyWork[day].UntrackedTasks)
-                {
-                    task.Hours *= scaleFactor;
-                    task.Hours = Math.Round(task.Hours * 2) / 2;
-                    task.Hours = Math.Max(
-                        Estimation.MinHoursPerTask,
-                        Math.Min(task.Hours, Estimation.MaxHoursPerTask));
-                }
             }
         }
     }
@@ -671,13 +512,88 @@ internal static class TaskTimeEstimator
             DayOfWeek.Monday);
     }
 
-    private sealed class TaskLifecycle
+    private static void BackfillLargeTasksToEmptyDays(
+        Dictionary<DateTime, List<TaskEstimate>> dailyEstimates,
+        List<CommitInfo> allCommits,
+        DateTime startDate)
     {
-        public string TaskId { get; set; } = "";
-        public DateTime FirstCommitDate { get; set; }
-        public List<CommitInfo> AllCommits { get; set; } = [];
-        public int DayCount { get; set; }
-        public List<DateTime> CommitDates { get; set; } = [];
+        var sortedDates = dailyEstimates.Keys.OrderBy(d => d).ToList();
+
+        foreach (var commitDate in sortedDates)
+        {
+            var tasksOnCommitDay = dailyEstimates[commitDate].ToList();
+
+            foreach (var task in tasksOnCommitDay)
+            {
+                var taskCommits = allCommits.Where(c => c.TaskId == task.TaskId).ToList();
+                var totalLines = taskCommits.Sum(c => c.LinesAdded + c.LinesDeleted);
+
+                // Only backfill substantial tasks
+                if (totalLines < 200)
+                    continue;
+
+                // Calculate size-based estimate
+                var sizeBasedEstimate = EstimateFromSize(taskCommits, task.Title, "");
+
+                // If current time-based estimate is much smaller than size suggests,
+                // and there are empty days before this commit, backfill
+                if (task.Hours < sizeBasedEstimate * 0.6)
+                {
+                    var previousDate = sortedDates
+                        .Where(d => d < commitDate)
+                        .DefaultIfEmpty(startDate.AddDays(-1))
+                        .Max();
+
+                    var daysSincePrevious = (commitDate - previousDate).Days;
+
+                    if (daysSincePrevious > 1 && daysSincePrevious <= 4)
+                    {
+                        // Find empty work days
+                        var emptyDays = new List<DateTime>();
+                        for (var d = commitDate.AddDays(-1); d > previousDate && emptyDays.Count < daysSincePrevious - 1; d = d.AddDays(-1))
+                            if (d >= startDate)
+                                emptyDays.Add(d);
+
+                        if (emptyDays.Count > 0)
+                        {
+                            // Calculate hours to backfill
+                            var hoursDeficit = sizeBasedEstimate - task.Hours;
+                            var hoursToBackfill = Math.Min(hoursDeficit, sizeBasedEstimate * 0.5);
+
+                            if (hoursToBackfill >= 2.0)
+                            {
+                                // Distribute evenly across empty days
+                                var hoursPerDay = hoursToBackfill / emptyDays.Count;
+                                hoursPerDay = Math.Round(hoursPerDay * 2) / 2;
+
+                                if (hoursPerDay >= Estimation.MinHoursPerTask)
+                                {
+                                    foreach (var day in emptyDays)
+                                    {
+                                        if (!dailyEstimates.ContainsKey(day))
+                                            dailyEstimates[day] = [];
+
+                                        dailyEstimates[day].Add(new TaskEstimate(
+                                            task.Title,
+                                            task.TaskId,
+                                            task.IssueId,
+                                            task.HasIssue,
+                                            hoursPerDay,
+                                            day.AddHours(10),
+                                            []
+                                        ));
+                                    }
+
+                                    // Add remaining hours to commit day
+                                    task.Hours += hoursPerDay;
+                                    task.Hours = Math.Round(task.Hours * 2) / 2;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private sealed class TaskEstimate(string title, string taskId, string? issueId, bool hasIssue, double hours, DateTime startTime, List<CommitInfo> commits)
