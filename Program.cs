@@ -1,4 +1,6 @@
 ﻿using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
+using System.Text;
 
 using NGitLab;
 
@@ -232,73 +234,62 @@ processButton.Accepted += (s, e) =>
         Title = $" Timesheet — {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd} "
     };
 
-    var contentView = new View
+    var textOutputView = new TextOutputView
     {
         X = 0,
         Y = 0,
         Width = Dim.Fill(),
-        Height = Dim.Fill() - 3,
-        CanFocus = true
+        Height = Dim.Fill() - 3
     };
 
-    resultWindow.Add(contentView);
+    resultWindow.Add(textOutputView);
 
-    // Add results lines
-    var ry = 0;
-    var contentWidth = 0;
+    var output = new StringBuilder();
 
-    void AddLine(string text)
-    {
-        var label = new Label { X = 0, Y = ry, Text = text };
-        contentView.Add(label);
-        ry++;
-        contentWidth = Math.Max(contentWidth, text.Length);
-    }
-
-    AddLine($"Found {timesheet.TotalCommits} commits ({timesheet.TrackedCommits} tracked) across {timesheet.TaskCount} tasks");
-    AddLine("");
+    output.AppendLine(CultureInfo.InvariantCulture, $"Found {timesheet.TotalCommits} commits ({timesheet.TrackedCommits} tracked) across {timesheet.TaskCount} tasks");
+    output.AppendLine();
 
     var totalHours = 0.0;
     foreach (var day in timesheet.Days.OrderBy(d => d.Date))
     {
         if (day.TrackedTasks.Count is not 0 || day.UntrackedTasks.Count is not 0)
         {
-            AddLine($"{day.Date:yyyy-MM-dd} ({day.Date:ddd})");
+            output.AppendLine(CultureInfo.InvariantCulture, $"{day.Date:yyyy-MM-dd} ({day.Date:ddd})");
 
             foreach (var task in day.TrackedTasks.OrderBy(t => t.StartTime))
             {
                 var issueDisplay = !string.IsNullOrEmpty(task.IssueId) ? $"[{task.IssueId}] " : "";
-                AddLine($"  {task.Hours:F1}h - {issueDisplay}{task.Title}");
+                output.AppendLine(CultureInfo.InvariantCulture, $"  {task.Hours:F1}h - {issueDisplay}{task.Title}");
                 totalHours += task.Hours;
             }
 
-            AddLine($"  Total: {day.TrackedHours:F1}h");
+            output.AppendLine(CultureInfo.InvariantCulture, $"  Total: {day.TrackedHours:F1}h");
 
             if (day.UntrackedTasks.Count is not 0)
             {
-                AddLine("  Untracked (no issue):");
+                output.AppendLine("  Untracked (no issue):");
                 foreach (var task in day.UntrackedTasks.OrderBy(t => t.StartTime))
-                    AddLine($"    {task.Hours:F1}h - {task.Title}");
+                    output.AppendLine(CultureInfo.InvariantCulture, $"    {task.Hours:F1}h - {task.Title}");
             }
 
-            AddLine("");
+            output.AppendLine();
         }
     }
 
-    AddLine(new string('-', 50));
-    AddLine($"Total tracked hours: {totalHours:F1}h");
+    output.AppendLine(new string('-', 50));
+    output.AppendLine(CultureInfo.InvariantCulture, $"Total tracked hours: {totalHours:F1}h");
     var workDays = timesheet.Days.Count(d => d.TrackedTasks.Count is not 0);
     if (workDays > 0)
-        AddLine($"Average hours/day: {totalHours / workDays:F1}h");
+        output.AppendLine(CultureInfo.InvariantCulture, $"Average hours/day: {totalHours / workDays:F1}h");
 
-    contentView.Scrollable().SetContentSize(new System.Drawing.Size(contentWidth, ry));
+    textOutputView.Text = output.ToString();
 
     var logButton = new Button() { Text = "Log to Jira" };
     var copyButton = new Button() { Text = "Copy" };
     var closeButton = new Button() { Text = "Close" };
 
     copyButton.Accepting += (s, e) => e.Handled = true;
-    copyButton.Accepted += (s, e) => ClipboardService.SetText(string.Join('\n', contentView.GetSubViews().OfType<Label>().Select(label => label.Text)));
+    copyButton.Accepted += (s, e) => ClipboardService.SetText(string.Join('\n', textOutputView.GetSubViews().OfType<Label>().Select(label => label.Text)));
 
     closeButton.Accepting += (s, e) => e.Handled = true;
     closeButton.Accepted += (s, e) => app.RequestStop();
@@ -327,14 +318,14 @@ processButton.Accepted += (s, e) =>
         }
     };
 
-    contentView.SetFocus();
+    textOutputView.SetFocus();
 
     app.Run(resultWindow);
 };
 
 app.Run(mainWindow);
 
-bool Try<T>(Func<T> func, [NotNullWhen(true)] out T value)
+static bool Try<T>(Func<T> func, [NotNullWhen(true)] out T value)
 {
     try
     {
